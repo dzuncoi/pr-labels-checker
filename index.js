@@ -1,21 +1,41 @@
 const core = require('@actions/core');
-const wait = require('./wait');
+const github = require('@actions/github');
 
+async function getPRLabels(octokit) {
+  const owner = github.context.repo.owner;
+  const repo = github.context.repo.repo;
+  const commit_sha = github.context.sha;
 
-// most @actions toolkit packages have async methods
-async function run() {
+  const res = await octokit.rest.repos.listPullRequestsAssociatedWithCommit({
+    owner,
+    repo,
+    commit_sha,
+  })
+
+  const latestPr = res.data && res.data.length > 0 && res.data[0];
+  return latestPr ? latestPr.labels.map(l => l.name) : []
+}
+
+function getInputLabels() {
+  const raw = core.getInput('labels', { required: true });
+  let json
   try {
-    const ms = core.getInput('milliseconds');
-    core.info(`Waiting ${ms} milliseconds ...`);
-
-    core.debug((new Date()).toTimeString()); // debug is only output if you set the secret `ACTIONS_RUNNER_DEBUG` to true
-    await wait(parseInt(ms));
-    core.info((new Date()).toTimeString());
-
-    core.setOutput('time', new Date().toTimeString());
-  } catch (error) {
-    core.setFailed(error.message);
+    json = JSON.parse(raw)
+    return Array.isArray(json) ? json : []
+  } catch (e) {
+    return []
   }
+}
+
+async function run() {
+  const token = core.getInput('github-token', { required: true });
+  const octokit = github.getOctokit(token);
+
+  const prLabels = getPRLabels(octokit);
+  const inputLabels = getInputLabels();
+
+  if (inputLabels.some(l => prLabels.includes(l))) core.setOutput('labelsMatched', true)
+  core.setFailed(core.ExitCode.Success);
 }
 
 run();
